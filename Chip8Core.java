@@ -252,7 +252,7 @@ public class Chip8Core {
 					V[x] = (V[x] - V[y]) & 0x000000FF;//Forcing 8 bits
 					V[0xF] = 1;//NOT borrow
 				}else{
-					V[x] = (0x100 + V[x] - V[y]) & 0x000000FF;//Forcing 8 bits
+					V[x] = (/*0x100+*/V[x] - V[y]) & 0x000000FF;//Forcing 8 bits ([JEF] takes 0x100 as borrow)
 					V[0xF] = 0;//Borrow
 				}
 				break;
@@ -270,7 +270,7 @@ public class Chip8Core {
 					V[x] = (V[y] - V[x]) & 0x000000FF;//Forcing 8 bits
 				}else{
 					V[0xF] = 0;//borrow
-					V[x] = (0x100 + V[y] - V[x]) & 0x000000FF;//Forcing 8 bits
+					V[x] = (/*0x100+*/V[y] - V[x]) & 0x000000FF;//Forcing 8 bits ([JEF] takes 0x100 as borrow)
 				}
 				break;
 			case 0x0000000E: // 0x8XYE Shifts VX left by one. VF is set to the value of the most significant bit of VX before the shift
