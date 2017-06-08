@@ -249,11 +249,12 @@ public class Chip8Core {
 				x = (opcode & 0x00000F00) >> 8;
 				y = (opcode & 0x000000F0) >> 4;
 				if(V[x] >= V[y]){//If VX > VY -> VF is set to 1 [COW] ([JEF] does >= !! Why? <I WILL DO >= too>)
+					V[x] = (V[x] - V[y]) & 0x000000FF;//Forcing 8 bits
 					V[0xF] = 1;//NOT borrow
 				}else{
+					V[x] = (0x100 + V[x] - V[y]) & 0x000000FF;//Forcing 8 bits
 					V[0xF] = 0;//Borrow
 				}
-				V[x] = (V[x] - V[y]) & 0x000000FF;//Forcing 8 bits
 				break;
 			case 0x00000006: // 0x8XY6 Shifts VX right by one. VF is set to the value of the least significant bit of VX before the shift
 				x = (opcode & 0x00000F00) >> 8;
@@ -266,14 +267,15 @@ public class Chip8Core {
 				y = (opcode & 0x00F0) >> 4;
 				if(V[y] >= V[x]){//If VY > VX there is no a borrow [COW] ([JEF] does >= !! Why? <I WILL DO >= too>)
 					V[0xF] = 1;//NOT borrow
+					V[x] = (V[y] - V[x]) & 0x000000FF;//Forcing 8 bits
 				}else{
 					V[0xF] = 0;//borrow
+					V[x] = (0x100 + V[y] - V[x]) & 0x000000FF;//Forcing 8 bits
 				}
-				V[x] = (V[y] - V[x]) & 0x000000FF;//Forcing 8 bits
 				break;
 			case 0x0000000E: // 0x8XYE Shifts VX left by one. VF is set to the value of the most significant bit of VX before the shift
 				x = (opcode & 0x00000F00) >> 8;
-				V[0xF] = V[x] >> 7;//(V[x] & 0x80);//0x80=200_10=10000000_2////Getting the value of the most significant bit before shifting
+				V[0xF] = (V[x] >> 7) & 0x1;//(V[x] & 0x80);//0x80=200_10=10000000_2////Getting the value of the most significant bit before shifting
 				V[x] = (V[x] << 1) & 0x000000FF;//Left Shifting & Forcing 8 bits				
 				break;
 			default: throw new Exception("Unknown variation of form 8XY_(Expected: 0, 1, 2, 3, 4, 5, 6, 7, E)");
@@ -307,22 +309,22 @@ public class Chip8Core {
 		int x = V[(opcode & 0x00000F00)>>8];//Remember: integers are of 32 bits
 		int y = V[(opcode & 0x000000F0)>>4];
 		int n = (opcode & 0x0000000F);
-		int pixels;		
+		int pixels, fX, fY, buffer;		
 		V[0xF] = 0;//VF is set to 1 if any screen pixels are flipped from set to unset 
 		for(int i = 0; i<n; i++){//The sprite has a height of N
 			pixels = memory[I+i];//Each row of 8 pixels is read as bit-coded starting from memory location I (which will remain unaltered)
 			for(int j=0; j<8; j++){//Reading the row of 8 pixels
 				if((pixels & (0x80>>j))!=0){//Accessing to the j^th bit: 0x80 = 10000000. We will shift according to j to progressively perform the AND where needed
-					if(x+j>63 || y+i>31){//Ignoring the pixels outside the screen
-						continue;
+					fX = (x+j) /*% 64*/;//Module forces turning around the screen, but some games are not compatible with this (e.g. Blitz) 
+					fY = (y + i) /*% 32*/;
+					if(fX>63 || fY>31) continue;
+					buffer = fX + fY*64;
+					if(screen[buffer] == true){
+						V[0xF] = 1;//Collision 
+						screen[buffer] = false;
 					}else{
-						if(screen[(x + j + ((y + i) * 64))] == true){
-							V[0xF] = 1;//Collision 
-							screen[x + j + ((y + i) * 64)] = false;
-						}else{
-							screen[x + j + ((y + i) * 64)] = true;
-						}
-					}					
+						screen[buffer] = true;
+					}				
 				}//We don't mind when it is 0 as 0_XOR_0 = 0 and 0_XOR_1 = 1 -> It does not change the screen
 			}
 		}
@@ -381,13 +383,13 @@ public class Chip8Core {
 				pc += 2;
 				break;
 			case 0x0000001E: // FX1E: Adds VX to I
-				x = (opcode & 0x00000F00) >> 8;
-				if((I + V[x]) > 0x0000FFF){// VF is set to 1 when range overflow (I+VX>0xFFF) and to 0 otherwise (See Note 3 in Wikipedia)
+				int result = I + V[(opcode & 0x00000F00) >> 8];
+				if(result > 0x0000FFF){// VF is set to 1 when range overflow (I+VX>0xFFF) and to 0 otherwise (See Note 3 in Wikipedia)
 					V[0xF] = 1;
 				}else{
 					V[0xF] = 0;
 				}
-				I = (I + V[x]) & 0x0000FFFF;//Forcing 16 bits considering the register length (12 bits would force a valid direction though)
+				I = result & 0x00000FFF;//Forcing 16 bits considering the register length (12 bits would force a valid direction though)
 				pc += 2;
 				break;
 			case 0x00000029: // FX29: Sets I to the location of the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font
@@ -396,9 +398,9 @@ public class Chip8Core {
 				break;
 			case 0x00000033: // FX33: Stores the Binary-coded decimal representation of VX at the addresses I, I plus 1, and I plus 2
 				x = (opcode & 0x00000F00) >> 8;
-				memory[I]     = V[x] / 100;
-				memory[I + 1] = (V[x] / 10) % 10;
-				memory[I + 2] = (V[x] % 100) % 10;					
+				memory[I]     = (int) Math.floor(V[x]/100) % 10;
+				memory[I + 1] = (int) Math.floor(V[x]/10) % 10;
+				memory[I + 2] = (V[x] % 10);					
 				pc += 2;
 				break;
 			case 0x00000055: // FX55: Stores V0 to VX in memory starting at address I					
